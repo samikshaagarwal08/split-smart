@@ -7,4 +7,6 @@ export type GroupListItem = {
   ownerId: string;
   membersCount: number;
   memberIds: string[];
+  synced?: boolean;
+  pendingAction?: "create" | "join";
 };
