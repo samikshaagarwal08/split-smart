@@ -1,5 +1,6 @@
 import Link from "next/link";
 import LogoutButton from "./Logout";
+import Image from "next/image";
 
 export function Navbar() {
   return (
@@ -8,13 +9,14 @@ export function Navbar() {
         <div className="flex items-center gap-2">
         <Link
           href="/"
-          className="text-base font-bold tracking-tight text-zinc-900"
+          className="text-base inline-flex items-center justify-center font-bold tracking-tight text-zinc-900"
         >
+          <Image src='/logo.png' alt="SplitSmart Logo" width={45} height={45} />
           SplitSmart
         </Link>
-        <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+        {/* <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
           Phase 1
-        </span>
+        </span> */}
         </div>
         <LogoutButton />
       </div>

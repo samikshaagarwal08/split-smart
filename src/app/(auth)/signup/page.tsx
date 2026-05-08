@@ -82,7 +82,7 @@ export default function Signup() {
                             <button
                                 type="button"
                                 onClick={() => setShowPassword(!showPassword)}
-                                className="absolute cursor-pointer right-2 top-1/2 -translate-y-1/2 text-sm text-gray-500 hover:text-black"
+                                className="absolute cursor-pointer right-2 top-1/2 -translate-y-1/2 text-sm text-gray-500 hover:text-primary"
                             >
                                 {showPassword ? <EyeOffIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
                             </button>
@@ -96,7 +96,7 @@ export default function Signup() {
                     disabled={loading}
                     className={`w-full py-2.5 cursor-pointer rounded-lg font-medium transition flex items-center justify-center gap-2 ${loading
                             ? "bg-gray-400 text-white cursor-not-allowed"
-                            : "bg-black text-white hover:bg-gray-800"
+                            : "bg-primary text-white hover:bg-gray-800"
                         }`}
                 >
                     {loading ? <Loader2Icon className="w-5 h-5 animate-spin" /> : "Sign Up"}
@@ -107,7 +107,7 @@ export default function Signup() {
                     Already have an account?{" "}
                     <Link
                         href="/login"
-                        className="text-black font-medium hover:underline"
+                        className="text-primary font-medium hover:underline"
                     >
                         Login
                     </Link>

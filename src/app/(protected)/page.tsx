@@ -1,11 +1,17 @@
 "use client";
 
 import { GroupCard } from "@/components/GroupCard";
-import { db, type LocalExpense } from "@/lib/db";
+import { db, type LocalExpense, type LocalGroupMember } from "@/lib/db";
 import { pullGroupsToLocal, syncPendingData } from "@/lib/sync";
 import { useOnline } from "@/lib/useOnline";
 import type { GroupListItem } from "@/types/group";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 
 function readErrorMessage(data: unknown, fallback: string) {
   if (
@@ -36,10 +42,13 @@ export default function Home() {
   const [splitType, setSplitType] = useState<"equal" | "custom">("equal");
   const [customUserId, setCustomUserId] = useState("");
   const [customAmount, setCustomAmount] = useState("");
-  const [customSplits, setCustomSplits] = useState<{ userId: string; amount: number }[]>([]);
+  const [customSplits, setCustomSplits] = useState<
+    { userId: string; amount: number }[]
+  >([]);
 
   const [groups, setGroups] = useState<GroupListItem[]>([]);
   const [expenses, setExpenses] = useState<LocalExpense[]>([]);
+  const [members, setMembers] = useState<LocalGroupMember[]>([]);
 
   const [loadingList, setLoadingList] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -53,20 +62,25 @@ export default function Home() {
   const [expenseError, setExpenseError] = useState<string | null>(null);
   const [expenseSuccess, setExpenseSuccess] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const loadLocalData = useCallback(async () => {
     setLoadingList(true);
     setListError(null);
     try {
-      const [localGroups, localExpenses] = await Promise.all([
+      const [localGroups, localExpenses, localMembers] = await Promise.all([
         db.groups.orderBy("createdAt").reverse().toArray(),
         db.expenses.orderBy("createdAt").reverse().toArray(),
+        db.members.toArray(),
       ]);
       setGroups(localGroups as GroupListItem[]);
       setExpenses(localExpenses);
+      setMembers(localMembers);
     } catch (e) {
-      setListError(e instanceof Error ? e.message : "Could not load local data");
+      setListError(
+        e instanceof Error ? e.message : "Could not load local data",
+      );
       setGroups([]);
       setExpenses([]);
     } finally {
@@ -79,6 +93,8 @@ export default function Home() {
     setSyncing(true);
     try {
       const result = await syncPendingData();
+      const now = new Date().toLocaleTimeString();
+      setLastSyncedAt(now);
       if (result.errors > 0) {
         setSyncMessage(`Sync completed with ${result.errors} error(s).`);
       } else if (result.syncedGroups + result.syncedExpenses > 0) {
@@ -124,23 +140,29 @@ export default function Home() {
     setCreating(true);
     try {
       const groupId = crypto.randomUUID();
+      const now = new Date().toISOString();
       await db.groups.put({
         id: groupId,
         name: trimmed,
         code: "PENDING",
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
         ownerId: "me",
         membersCount: 0,
         memberIds: [],
         synced: !online,
+        deleted: false,
         pendingAction: "create",
       });
       await db.members.put({
         id: `${groupId}:me`,
         userId: "me",
         groupId,
-        joinedAt: new Date().toISOString(),
+        joinedAt: now,
+        updatedAt: now,
         synced: !online,
+        deleted: false,
+        name: "You",
       });
       setName("");
       await loadLocalData();
@@ -160,7 +182,9 @@ export default function Home() {
       return;
     }
     if (!online) {
-      setJoinError("Join needs internet. Cached groups are still available offline.");
+      setJoinError(
+        "Join needs internet. Cached groups are still available offline.",
+      );
       return;
     }
 
@@ -191,6 +215,30 @@ export default function Home() {
     if (!selectedGroupId) return expenses;
     return expenses.filter((exp) => exp.groupId === selectedGroupId);
   }, [expenses, selectedGroupId]);
+
+  const selectedGroupMembers = useMemo(() => {
+    if (!selectedGroupId) return [] as LocalGroupMember[];
+    return members.filter((member) => member.groupId === selectedGroupId);
+  }, [members, selectedGroupId]);
+
+  const selectedGroupMemberOptions = useMemo(() => {
+    if (!selectedGroup) return [] as LocalGroupMember[];
+    if (selectedGroupMembers.length > 0) return selectedGroupMembers;
+    return selectedGroup.memberIds.map((memberId) => ({
+      id: `${selectedGroup.id}:${memberId}`,
+      userId: memberId,
+      groupId: selectedGroup.id,
+      joinedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      synced: true,
+      name: memberId,
+    }));
+  }, [selectedGroup, selectedGroupMembers]);
+
+  const selectedGroupMemberIds = useMemo(
+    () => selectedGroupMemberOptions.map((member) => member.userId),
+    [selectedGroupMemberOptions],
+  );
 
   const localBalances = useMemo(() => {
     const map = new Map<string, number>();
@@ -238,30 +286,41 @@ export default function Home() {
     const parsedAmount = Number(amount);
     if (!selectedGroupId) return setExpenseError("Select a group first.");
     if (selectedGroup && selectedGroup.synced === false) {
-      return setExpenseError("Wait for this group to sync before adding expenses.");
+      return setExpenseError(
+        "Wait for this group to sync before adding expenses.",
+      );
     }
-    if (!expenseTitle.trim()) return setExpenseError("Expense title is required.");
+    if (selectedGroupMemberIds.length === 0) {
+      return setExpenseError("Selected group has no members yet.");
+    }
+    if (!expenseTitle.trim())
+      return setExpenseError("Expense title is required.");
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       return setExpenseError("Amount must be greater than 0.");
     }
 
     setAddingExpense(true);
     try {
+      const now = new Date().toISOString();
       const localExpense: LocalExpense = {
         id: crypto.randomUUID(),
         title: expenseTitle.trim(),
         amount: Number(parsedAmount.toFixed(2)),
         groupId: selectedGroupId,
         splitType,
-        users: selectedGroup?.memberIds ?? [],
+        users: selectedGroupMemberIds,
         customSplits: splitType === "custom" ? customSplits : [],
-        createdAt: new Date().toISOString(),
+        createdAt: now,
+        updatedAt: now,
         synced: !online,
+        deleted: false,
       };
 
       await db.expenses.put(localExpense);
       setExpenseSuccess(
-        online ? "Expense saved locally and queued for sync." : "Expense saved offline.",
+        online
+          ? "Expense saved locally and queued for sync."
+          : "Expense saved offline.",
       );
       setExpenseTitle("");
       setAmount("");
@@ -286,7 +345,8 @@ export default function Home() {
       <div suppressHydrationWarning>
         {!online ? (
           <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-900">
-            Offline mode active. Changes are saved locally and will sync automatically.
+            Offline mode active. Changes are saved locally and will sync
+            automatically.
           </div>
         ) : null}
       </div>
@@ -294,8 +354,10 @@ export default function Home() {
       <section className="border-b border-zinc-200 bg-linear-to-br from-zinc-50 via-white to-emerald-50/50">
         <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-emerald-700">SplitSmart Premium</p>
-            <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-xs text-white">
+            <p className="text-sm font-semibold text-emerald-700">
+              SplitSmart Premium
+            </p>
+            <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-white">
               {online ? "Online" : "Offline"}
             </span>
             {syncing ? (
@@ -313,13 +375,26 @@ export default function Home() {
             Local-first expense splitting
           </h1>
           <p className="mt-3 max-w-2xl text-base text-zinc-600">
-            UI always reads from IndexedDB first. You can keep adding data in airplane mode.
+            UI always reads from IndexedDB first. You can keep adding data in
+            airplane mode.
           </p>
-          {syncMessage ? <p className="mt-3 text-sm text-zinc-600">{syncMessage}</p> : null}
+          {syncMessage ? (
+            <p className="mt-3 text-sm text-zinc-600">{syncMessage}</p>
+          ) : null}
+          {lastSyncedAt ? (
+            <p className="mt-1 text-sm text-zinc-500">
+              Last synced at {lastSyncedAt}
+            </p>
+          ) : null}
 
-          <form onSubmit={createGroup} className="mt-8 flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end">
+          <form
+            onSubmit={createGroup}
+            className="mt-8 flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end"
+          >
             <div className="min-w-0 flex-1">
-              <label htmlFor="group-name" className="sr-only">Group name</label>
+              <label htmlFor="group-name" className="sr-only">
+                Group name
+              </label>
               <input
                 id="group-name"
                 type="text"
@@ -330,12 +405,14 @@ export default function Home() {
                 disabled={creating}
                 className="w-full rounded-xl border border-zinc-300 bg-white/90 px-4 py-3 text-sm text-zinc-900 shadow-sm outline-none ring-emerald-500/20 transition placeholder:text-zinc-400 focus:border-emerald-500 focus:ring-4 disabled:opacity-60"
               />
-              {formError ? <p className="mt-2 text-sm text-red-600">{formError}</p> : null}
+              {formError ? (
+                <p className="mt-2 text-sm text-red-600">{formError}</p>
+              ) : null}
             </div>
             <button
               type="submit"
               disabled={creating}
-              className="inline-flex shrink-0 items-center justify-center rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
+              className="inline-flex shrink-0 items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-800 disabled:opacity-50"
             >
               {creating ? "Saving..." : "Create group"}
             </button>
@@ -345,28 +422,44 @@ export default function Home() {
 
       <section className="mx-auto w-full max-w-5xl flex-1 space-y-8 px-4 py-10 sm:px-6">
         <div className="grid gap-4 md:grid-cols-2">
-          <form onSubmit={joinGroup} className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <h3 className="text-base font-semibold text-zinc-900">Join with code</h3>
-            <p className="mt-1 text-sm text-zinc-600">Joining requires internet.</p>
+          <form
+            onSubmit={joinGroup}
+            className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+          >
+            <h3 className="text-base font-semibold text-zinc-900">
+              Join with code
+            </h3>
+            <p className="mt-1 text-sm text-zinc-600">
+              Joining requires internet.
+            </p>
             <input
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value)}
               placeholder="e.g. A1B2C3"
               className="mt-4 w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-emerald-500"
             />
-            {joinError ? <p className="mt-2 text-sm text-red-600">{joinError}</p> : null}
+            {joinError ? (
+              <p className="mt-2 text-sm text-red-600">{joinError}</p>
+            ) : null}
             <button
               type="submit"
               disabled={joining || !online}
-              className="mt-4 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+              className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
             >
               {joining ? "Joining..." : "Join group"}
             </button>
           </form>
 
-          <form onSubmit={createExpense} className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <h3 className="text-base font-semibold text-zinc-900">Add expense</h3>
-            <p className="mt-1 text-sm text-zinc-600">Always writes local first, then syncs.</p>
+          <form
+            onSubmit={createExpense}
+            className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+          >
+            <h3 className="text-base font-semibold text-zinc-900">
+              Add expense
+            </h3>
+            <p className="mt-1 text-sm text-zinc-600">
+              Always writes local first, then syncs.
+            </p>
             <div className="mt-4 grid gap-3">
               <select
                 value={selectedGroupId}
@@ -375,7 +468,9 @@ export default function Home() {
               >
                 <option value="">Select group</option>
                 {groups.map((group) => (
-                  <option key={group.id} value={group.id}>{group.name}</option>
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
                 ))}
               </select>
               <input
@@ -418,8 +513,10 @@ export default function Home() {
                       className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
                     >
                       <option value="">Select user</option>
-                      {selectedGroup.memberIds.map((memberId) => (
-                        <option key={memberId} value={memberId}>{memberId}</option>
+                      {selectedGroupMemberOptions.map((member) => (
+                        <option key={member.userId} value={member.userId}>
+                          {member.name ?? member.userId}
+                        </option>
                       ))}
                     </select>
                     <input
@@ -430,27 +527,43 @@ export default function Home() {
                       placeholder="Split"
                       className="w-28 rounded-lg border border-zinc-300 px-3 py-2 text-sm"
                     />
-                    <button type="button" onClick={addCustomSplit} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm">
+                    <button
+                      type="button"
+                      onClick={addCustomSplit}
+                      className="rounded-lg bg-zinc-100 px-3 py-2 text-sm"
+                    >
                       Add
                     </button>
                   </div>
                   {customSplits.length > 0 ? (
                     <ul className="mt-2 text-xs text-zinc-600">
-                      {customSplits.map((item) => (
-                        <li key={item.userId}>{item.userId}: {item.amount.toFixed(2)}</li>
-                      ))}
+                      {customSplits.map((item) => {
+                        const memberName =
+                          selectedGroupMemberOptions.find(
+                            (m) => m.userId === item.userId,
+                          )?.name ?? item.userId;
+                        return (
+                          <li key={item.userId}>
+                            {memberName}: {item.amount.toFixed(2)}
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : null}
                 </div>
               ) : null}
             </div>
 
-            {expenseError ? <p className="mt-2 text-sm text-red-600">{expenseError}</p> : null}
-            {expenseSuccess ? <p className="mt-2 text-sm text-emerald-700">{expenseSuccess}</p> : null}
+            {expenseError ? (
+              <p className="mt-2 text-sm text-red-600">{expenseError}</p>
+            ) : null}
+            {expenseSuccess ? (
+              <p className="mt-2 text-sm text-emerald-700">{expenseSuccess}</p>
+            ) : null}
             <button
               type="submit"
               disabled={addingExpense}
-              className="mt-4 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+              className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
             >
               {addingExpense ? "Saving..." : "Add expense"}
             </button>
@@ -458,32 +571,52 @@ export default function Home() {
         </div>
 
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-lg font-semibold text-zinc-900">Your groups (from IndexedDB)</h2>
-          {!loadingList && groups.length > 0 ? <span className="text-sm text-zinc-500">{groups.length} total</span> : null}
+          <h2 className="text-lg font-semibold text-zinc-900">
+            Your groups (from IndexedDB)
+          </h2>
+          {!loadingList && groups.length > 0 ? (
+            <span className="text-sm text-zinc-500">{groups.length} total</span>
+          ) : null}
         </div>
 
         <div>
           {loadingList ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 py-16 text-center">
-              <span className="size-8 animate-spin rounded-full border-2 border-zinc-200 border-t-zinc-600" aria-hidden />
-              <p className="mt-4 text-sm font-medium text-zinc-600">Loading local data...</p>
+              <span
+                className="size-8 animate-spin rounded-full border-2 border-zinc-200 border-t-zinc-600"
+                aria-hidden
+              />
+              <p className="mt-4 text-sm font-medium text-zinc-600">
+                Loading local data...
+              </p>
             </div>
           ) : listError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center">
               <p className="text-sm font-medium text-red-800">{listError}</p>
-              <button type="button" onClick={() => void loadLocalData()} className="mt-4 text-sm font-semibold text-red-900 underline-offset-2 hover:underline">
+              <button
+                type="button"
+                onClick={() => void loadLocalData()}
+                className="mt-4 text-sm font-semibold text-red-900 underline-offset-2 hover:underline"
+              >
                 Try again
               </button>
             </div>
           ) : groups.length === 0 ? (
             <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/80 px-6 py-14 text-center">
-              <p className="text-base font-medium text-zinc-800">No groups yet</p>
-              <p className="mx-auto mt-2 max-w-sm text-sm text-zinc-600">Create your first group above. It will be stored locally immediately.</p>
+              <p className="text-base font-medium text-zinc-800">
+                No groups yet
+              </p>
+              <p className="mx-auto mt-2 max-w-sm text-sm text-zinc-600">
+                Create your first group above. It will be stored locally
+                immediately.
+              </p>
             </div>
           ) : (
             <ul className="grid gap-4 sm:grid-cols-2">
               {groups.map((g) => (
-                <li key={g.id}><GroupCard group={g} /></li>
+                <li key={g.id}>
+                  <GroupCard group={g} />
+                </li>
               ))}
             </ul>
           )}
@@ -491,21 +624,36 @@ export default function Home() {
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <h3 className="text-base font-semibold text-zinc-900">Local expenses</h3>
-            <p className="mt-1 text-sm text-zinc-600">Persisted across refresh (IndexedDB).</p>
+            <h3 className="text-base font-semibold text-zinc-900">
+              Local expenses
+            </h3>
+            <p className="mt-1 text-sm text-zinc-600">
+              Persisted across refresh (IndexedDB).
+            </p>
             {selectedGroupExpenses.length === 0 ? (
-              <p className="mt-4 text-sm text-zinc-500">No local expenses yet.</p>
+              <p className="mt-4 text-sm text-zinc-500">
+                No local expenses yet.
+              </p>
             ) : (
               <ul className="mt-4 space-y-2 text-sm">
                 {selectedGroupExpenses.slice(0, 8).map((exp) => (
-                  <li key={exp.id} className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2">
+                  <li
+                    key={exp.id}
+                    className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2"
+                  >
                     <div>
                       <p className="font-medium text-zinc-900">{exp.title}</p>
-                      <p className="text-xs text-zinc-500">{new Date(exp.createdAt).toLocaleString()}</p>
+                      <p className="text-xs text-zinc-500">
+                        {new Date(exp.createdAt).toLocaleString()}
+                      </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold text-zinc-900">{exp.amount.toFixed(2)}</p>
-                      <p className={`text-xs ${exp.synced ? "text-emerald-700" : "text-orange-700"}`}>
+                      <p className="font-semibold text-zinc-900">
+                        {exp.amount.toFixed(2)}
+                      </p>
+                      <p
+                        className={`text-xs ${exp.synced ? "text-emerald-700" : "text-orange-700"}`}
+                      >
                         {exp.synced ? "Synced" : "Pending"}
                       </p>
                     </div>
@@ -516,15 +664,26 @@ export default function Home() {
           </div>
 
           <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <h3 className="text-base font-semibold text-zinc-900">Local net balances</h3>
+            <h3 className="text-base font-semibold text-zinc-900">
+              Local net balances
+            </h3>
             {localBalances.length === 0 ? (
               <p className="mt-4 text-sm text-zinc-500">No balance data yet.</p>
             ) : (
               <ul className="mt-4 space-y-2 text-sm text-zinc-700">
                 {localBalances.map((b) => (
-                  <li key={b.userId} className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2">
+                  <li
+                    key={b.userId}
+                    className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2"
+                  >
                     <span>{b.userId}</span>
-                    <span className={b.balance >= 0 ? "text-emerald-700 font-semibold" : "text-red-700 font-semibold"}>
+                    <span
+                      className={
+                        b.balance >= 0
+                          ? "text-emerald-700 font-semibold"
+                          : "text-red-700 font-semibold"
+                      }
+                    >
                       {b.balance >= 0 ? "+" : ""}
                       {b.balance.toFixed(2)}
                     </span>

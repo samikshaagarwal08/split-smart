@@ -5,10 +5,12 @@ export interface LocalGroup {
   name: string;
   code: string;
   createdAt: string;
+  updatedAt: string;
   ownerId: string;
   membersCount: number;
   memberIds: string[];
   synced: boolean;
+  deleted?: boolean;
   pendingAction?: "create" | "join";
 }
 
@@ -21,7 +23,9 @@ export interface LocalExpense {
   users: string[];
   customSplits: { userId: string; amount: number }[];
   createdAt: string;
+  updatedAt: string;
   synced: boolean;
+  deleted?: boolean;
 }
 
 export interface LocalGroupMember {
@@ -29,7 +33,10 @@ export interface LocalGroupMember {
   userId: string;
   groupId: string;
   joinedAt: string;
+  updatedAt: string;
   synced: boolean;
+  deleted?: boolean;
+  name?: string | null;
 }
 
 class AppDB extends Dexie {
@@ -51,6 +58,13 @@ class AppDB extends Dexie {
       groups: "id, synced, pendingAction, createdAt",
       expenses: "id, groupId, synced, createdAt",
       members: "id, groupId, userId, synced",
+    });
+
+    // v4 adds updatedAt and deleted flags to support sync metadata.
+    this.version(4).stores({
+      groups: "id, synced, pendingAction, createdAt, updatedAt, deleted",
+      expenses: "id, groupId, synced, createdAt, updatedAt, deleted",
+      members: "id, groupId, userId, synced, updatedAt, deleted",
     });
   }
 }

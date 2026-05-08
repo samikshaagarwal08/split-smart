@@ -17,7 +17,7 @@ export default async function RootLayout({
       <div className="mb-6 flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
         <div>
           <p className="text-xs text-zinc-500">Signed in as</p>
-          <p className="text-sm font-semibold text-zinc-900">{session.user.email}</p>
+          <p className="text-sm font-semibold text-primary">{session.user.email}</p>
         </div>
         <LogoutButton />
       </div>

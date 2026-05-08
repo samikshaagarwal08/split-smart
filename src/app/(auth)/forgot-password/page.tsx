@@ -27,7 +27,7 @@ export default function ForgotPassword() {
 
         <button
           onClick={handleReset}
-          className="bg-black cursor-pointer text-white w-full py-2"
+          className="bg-primary cursor-pointer text-white w-full py-2"
         >
           Send Reset Link
         </button>

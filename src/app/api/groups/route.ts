@@ -98,7 +98,15 @@ export async function GET(req: Request) {
         code: true,
         ownerId: true,
         members: {
-          select: { userId: true },
+          select: {
+            userId: true,
+            user: {
+              select: {
+                name: true,
+                email: true,
+              },
+            },
+          },
         },
         _count: { select: { members: true } },
       },
@@ -111,6 +119,11 @@ export async function GET(req: Request) {
       ownerId: g.ownerId,
       membersCount: g._count.members,
       memberIds: g.members.map((m) => m.userId),
+      members: g.members.map((m) => ({
+        id: `${g.id}:${m.userId}`,
+        userId: m.userId,
+        name: m.user.name ?? m.user.email ?? m.userId,
+      })),
     }));
     return NextResponse.json(normalized);
   } catch (err) {

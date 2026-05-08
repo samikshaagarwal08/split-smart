@@ -70,8 +70,11 @@ model Group {
   id        String        @id @default(uuid())
   name      String
   createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
   ownerId   String
   code      String        @unique
+  synced    Boolean       @default(true)
+  deleted   Boolean       @default(false)
 
   owner     User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members   GroupMember[]
@@ -79,10 +82,12 @@ model Group {
 }
 
 model GroupMember {
-  id       String   @id @default(uuid())
-  userId   String
-  groupId  String
-  joinedAt DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  groupId   String
+  joinedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deleted   Boolean  @default(false)
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   group    Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -96,7 +101,10 @@ model Expense {
   amount    Float
   groupId   String
   createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
   paidById  String
+  synced    Boolean        @default(true)
+  deleted   Boolean        @default(false)
 
   group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   paidBy    User           @relation("ExpensePaidBy", fields: [paidById], references: [id], onDelete: Cascade)
@@ -108,6 +116,8 @@ model ExpenseSplit {
   userId     String
   expenseId  String
   amount     Float
+  updatedAt  DateTime @updatedAt
+  deleted    Boolean  @default(false)
 
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expense    Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)

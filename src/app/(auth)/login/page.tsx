@@ -83,7 +83,7 @@ export default function Login() {
         {/* Button */}
         <button
           onClick={login}
-          className="w-full cursor-pointer bg-black text-white py-2.5 rounded-lg hover:bg-gray-800 transition font-medium"
+          className="w-full cursor-pointer bg-primary text-white py-2.5 rounded-lg hover:bg-gray-800 transition font-medium"
         >
           {loading ? <Loader2Icon className="w-5 h-5 animate-spin" /> : "Sign In"}
         </button>
@@ -91,7 +91,7 @@ export default function Login() {
         {/* Footer */}
         <p className="text-center text-sm text-gray-500">
           Don’t have an account?{" "}
-          <Link href="/signup" className="text-black font-medium cursor-pointer hover:underline">
+          <Link href="/signup" className="text-primary font-medium cursor-pointer hover:underline">
             Sign up
           </Link>
         </p>
