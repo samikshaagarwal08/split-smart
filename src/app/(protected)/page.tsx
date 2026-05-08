@@ -340,6 +340,15 @@ export default function Home() {
     return unsyncedGroups + unsyncedExpenses;
   }, [groups, expenses]);
 
+  const uniqueMemberOptions = Array.from(
+  new Map(
+    selectedGroupMemberOptions.map((member) => [
+      member.userId,
+      member,
+    ])
+  ).values()
+);
+
   return (
     <div className="flex flex-1 flex-col">
       <div suppressHydrationWarning>
@@ -513,9 +522,9 @@ export default function Home() {
                       className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
                     >
                       <option value="">Select user</option>
-                      {selectedGroupMemberOptions.map((member) => (
+                      {uniqueMemberOptions.map((member) => (
                         <option key={member.userId} value={member.userId}>
-                          {member.name ?? member.userId}
+                          {member.name || "Unknown User"}
                         </option>
                       ))}
                     </select>
@@ -539,9 +548,9 @@ export default function Home() {
                     <ul className="mt-2 text-xs text-zinc-600">
                       {customSplits.map((item) => {
                         const memberName =
-                          selectedGroupMemberOptions.find(
+                          uniqueMemberOptions.find(
                             (m) => m.userId === item.userId,
-                          )?.name ?? item.userId;
+                          )?.name || "Unknown User";
                         return (
                           <li key={item.userId}>
                             {memberName}: {item.amount.toFixed(2)}
@@ -676,7 +685,11 @@ export default function Home() {
                     key={b.userId}
                     className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2"
                   >
-                    <span>{b.userId}</span>
+                    <span>
+                      {selectedGroupMemberOptions.find(
+                        (m) => m.userId === b.userId,
+                      )?.name || "Unknown User"}
+                    </span>
                     <span
                       className={
                         b.balance >= 0
