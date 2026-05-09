@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { GroupListItem } from "@/types/group";
+import { toast } from "sonner";
 
 type Props = { group: GroupListItem };
 
@@ -15,15 +16,31 @@ function formatDate(iso: string) {
 
 export function GroupCard({ group }: Props) {
   return (
-    <Link href={`/groups/${group.id}`} className="block rounded-xl border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/[0.04] transition hover:border-zinc-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+    <Link
+      href={`/groups/${group.id}`}
+      className="block rounded-xl border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/4 transition hover:border-zinc-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+    >
       <div className="flex items-start justify-between gap-3">
-        <h2 className="text-lg font-semibold tracking-tight text-zinc-900">{group.name}</h2>
-        <span className="rounded-md bg-zinc-100 px-2 py-1 font-mono text-xs text-zinc-700">
+        <h2 className="text-lg font-semibold tracking-tight text-zinc-900">
+          {group.name}
+        </h2>
+        <span
+          onClick={() => {
+            navigator.clipboard.writeText(group.code);
+            toast.success("Code copied");
+          }}
+          className="cursor-pointer rounded-md bg-zinc-100 px-2 py-1 font-mono text-xs text-zinc-700 transition hover:bg-zinc-200 active:scale-95"
+          title="Click to copy"
+        >
           {group.code}
         </span>
       </div>
-      <p className="mt-2 text-sm text-zinc-500">Created {formatDate(group.createdAt)}</p>
-      <p className="mt-1 text-xs text-zinc-500">{group.membersCount} member(s)</p>
+      <p className="mt-2 text-sm text-zinc-500">
+        Created {formatDate(group.createdAt)}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">
+        {group.membersCount} member(s)
+      </p>
     </Link>
   );
 }

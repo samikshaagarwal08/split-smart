@@ -31,6 +31,20 @@ async function assertOk(res: Response, fallback: string) {
   return data;
 }
 
+function dedupeMembersByUserId(members: LocalGroupMember[]) {
+  return Array.from(
+    new Map(
+      members
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        )
+        .map((member) => [member.userId, member] as const),
+    ).values(),
+  );
+}
+
 export default function Home() {
   const online = useOnline();
 
@@ -76,7 +90,7 @@ export default function Home() {
       ]);
       setGroups(localGroups as GroupListItem[]);
       setExpenses(localExpenses);
-      setMembers(localMembers);
+      setMembers(dedupeMembersByUserId(localMembers));
     } catch (e) {
       setListError(
         e instanceof Error ? e.message : "Could not load local data",
@@ -351,7 +365,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <div suppressHydrationWarning>
+      <div>
         {!online ? (
           <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-900">
             Offline mode active. Changes are saved locally and will sync
