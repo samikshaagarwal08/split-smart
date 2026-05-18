@@ -25,6 +25,18 @@ type SyncExpense = {
   deleted?: boolean;
 };
 
+type SyncSettlement = {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  groupId: string;
+  amount: number;
+  status?: string;
+  createdAt: string;
+  updatedAt: string;
+  deleted?: boolean;
+};
+
 type SplitRow = {
   userId: string;
   amount: number;
@@ -51,6 +63,10 @@ function normalizeUserId(userId: string, sessionUserId: string) {
   return userId === "me" ? sessionUserId : userId;
 }
 
+function normalizeStatus(status: unknown) {
+  return status === "paid" ? "paid" : "pending";
+}
+
 function dedupeSplitRows(rows: SplitRow[]) {
   const aggregated = rows.reduce<Record<string, number>>((acc, row) => {
     acc[row.userId] = (acc[row.userId] ?? 0) + row.amount;
@@ -68,6 +84,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as {
       groups?: unknown;
       expenses?: unknown;
+      settlements?: unknown;
     };
 
     const groups = Array.isArray(body.groups) ? body.groups.map((item) => ({
@@ -100,8 +117,21 @@ export async function POST(req: Request) {
       deleted: Boolean((item as any).deleted),
     })) : [];
 
+    const settlements = Array.isArray(body.settlements) ? body.settlements.map((item) => ({
+      id: normalizeId((item as any).id),
+      fromUserId: normalizeId((item as any).fromUserId),
+      toUserId: normalizeId((item as any).toUserId),
+      groupId: normalizeId((item as any).groupId),
+      amount: typeof (item as any).amount === "number" ? (item as any).amount : Number.NaN,
+      status: normalizeStatus((item as any).status),
+      createdAt: normalizeString((item as any).createdAt),
+      updatedAt: normalizeString((item as any).updatedAt),
+      deleted: Boolean((item as any).deleted),
+    })) : [];
+
     let syncedGroups = 0;
     let syncedExpenses = 0;
+    let syncedSettlements = 0;
     const updatedGroups: Array<{ id: string; code: string; updatedAt: string }> = [];
 
     for (const group of groups) {
@@ -230,7 +260,56 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ groups: syncedGroups, expenses: syncedExpenses, updatedGroups });
+    for (const settlement of settlements) {
+      if (!settlement.id || !settlement.fromUserId || !settlement.toUserId || !settlement.groupId || !Number.isFinite(settlement.amount)) continue;
+      if (settlement.fromUserId === settlement.toUserId) continue;
+
+      const normalizedFrom = normalizeUserId(settlement.fromUserId, session.user.id);
+      const normalizedTo = normalizeUserId(settlement.toUserId, session.user.id);
+      const status = normalizeStatus(settlement.status);
+
+      const existing = await prisma.settlement.findUnique({
+        where: { id: settlement.id },
+        select: { updatedAt: true, deleted: true },
+      });
+
+      if (settlement.deleted) {
+        if (existing) {
+          await prisma.settlement.update({ where: { id: settlement.id }, data: { deleted: true } });
+          syncedSettlements += 1;
+        }
+        continue;
+      }
+
+      if (!existing) {
+        await prisma.settlement.create({
+          data: {
+            id: settlement.id,
+            groupId: settlement.groupId,
+            fromUserId: normalizedFrom,
+            toUserId: normalizedTo,
+            amount: Number(settlement.amount.toFixed(2)),
+            status,
+          },
+        });
+        syncedSettlements += 1;
+        continue;
+      }
+
+      if (isNewer(settlement.updatedAt, existing.updatedAt.toISOString())) {
+        await prisma.settlement.update({
+          where: { id: settlement.id },
+          data: {
+            amount: Number(settlement.amount.toFixed(2)),
+            status,
+            deleted: false,
+          },
+        });
+        syncedSettlements += 1;
+      }
+    }
+
+    return NextResponse.json({ groups: syncedGroups, expenses: syncedExpenses, settlements: syncedSettlements, updatedGroups });
   } catch (err) {
     console.error("[POST /api/sync/push]", err);
     return errorJson("Could not sync local changes", 500);

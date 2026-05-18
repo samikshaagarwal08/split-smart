@@ -28,6 +28,19 @@ export interface LocalExpense {
   deleted?: boolean;
 }
 
+export interface LocalSettlement {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  groupId: string;
+  amount: number;
+  status: "pending" | "paid";
+  createdAt: string;
+  updatedAt: string;
+  synced: boolean;
+  deleted?: boolean;
+}
+
 export interface LocalGroupMember {
   id: string;
   userId: string;
@@ -43,6 +56,7 @@ class AppDB extends Dexie {
   groups!: Table<LocalGroup>;
   expenses!: Table<LocalExpense>;
   members!: Table<LocalGroupMember>;
+  settlements!: Table<LocalSettlement>;
 
   constructor() {
     super("SplitSmartDB");
@@ -65,6 +79,14 @@ class AppDB extends Dexie {
       groups: "id, synced, pendingAction, createdAt, updatedAt, deleted",
       expenses: "id, groupId, synced, createdAt, updatedAt, deleted",
       members: "id, groupId, userId, synced, updatedAt, deleted",
+    });
+
+    // v5 adds settlement support for offline tracking and sync.
+    this.version(5).stores({
+      groups: "id, synced, pendingAction, createdAt, updatedAt, deleted",
+      expenses: "id, groupId, synced, createdAt, updatedAt, deleted",
+      members: "id, groupId, userId, synced, updatedAt, deleted",
+      settlements: "id, groupId, fromUserId, toUserId, synced, createdAt, updatedAt, deleted",
     });
   }
 }

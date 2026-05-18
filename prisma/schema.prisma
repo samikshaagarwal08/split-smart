@@ -3,25 +3,27 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 // Reserved for auth / future phases. Expenses are tied to groups only in Phase 1.
 model User {
-  id            String    @id
-  name          String?
-  email         String    @unique
-  emailVerified Boolean
-  image         String?
-  createdAt     DateTime
-  updatedAt     DateTime
-  sessions      Session[]
-  accounts      Account[]
-  ownedGroups   Group[]      @relation("GroupOwner")
-  memberships   GroupMember[]
-  paidExpenses  Expense[]    @relation("ExpensePaidBy")
-  splits        ExpenseSplit[]
+  id                  String            @id
+  name                String?
+  email               String            @unique
+  emailVerified       Boolean
+  image               String?
+  createdAt           DateTime
+  updatedAt           DateTime
+  sessions            Session[]
+  accounts            Account[]
+  ownedGroups         Group[]           @relation("GroupOwner")
+  memberships         GroupMember[]
+  paidExpenses        Expense[]         @relation("ExpensePaidBy")
+  splits              ExpenseSplit[]
+  settlementsSent     Settlement[]      @relation("SettlementFrom")
+  settlementsReceived Settlement[]      @relation("SettlementTo")
 }
 
 model Session {
@@ -67,18 +69,19 @@ model Verification {
 }
 
 model Group {
-  id        String        @id @default(uuid())
-  name      String
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  ownerId   String
-  code      String        @unique
-  synced    Boolean       @default(true)
-  deleted   Boolean       @default(false)
+  id          String        @id @default(uuid())
+  name        String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  ownerId     String
+  code        String        @unique
+  synced      Boolean       @default(true)
+  deleted     Boolean       @default(false)
 
-  owner     User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members   GroupMember[]
-  expenses  Expense[]
+  owner       User          @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     GroupMember[]
+  expenses    Expense[]
+  settlements Settlement[]
 }
 
 model GroupMember {
@@ -123,4 +126,22 @@ model ExpenseSplit {
   expense    Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
 
   @@unique([expenseId, userId])
+}
+
+model Settlement {
+  id          String            @id @default(uuid())
+  fromUserId  String
+  toUserId    String
+  groupId     String
+  amount      Float
+  status      String           @default("pending")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deleted     Boolean          @default(false)
+
+  fromUser    User              @relation("SettlementFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser      User              @relation("SettlementTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  group       Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
 }

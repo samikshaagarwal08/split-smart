@@ -42,6 +42,18 @@ type RemoteExpense = {
   deleted: boolean;
 };
 
+type RemoteSettlement = {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  groupId: string;
+  amount: number;
+  status: "pending" | "paid";
+  createdAt: string;
+  updatedAt: string;
+  deleted: boolean;
+};
+
 function isOnline() {
   return typeof navigator === "undefined" ? true : navigator.onLine;
 }
@@ -57,15 +69,16 @@ function isNewer(remote: string, local: string | undefined) {
 async function pushLocalChanges() {
   const localGroups = (await db.groups.toArray()).filter((group) => !group.synced || group.deleted);
   const localExpenses = (await db.expenses.toArray()).filter((expense) => !expense.synced || expense.deleted);
+  const localSettlements = (await db.settlements.toArray()).filter((settlement) => !settlement.synced || settlement.deleted);
 
-  if (localGroups.length === 0 && localExpenses.length === 0) {
-    return { groups: 0, expenses: 0, updates: [] };
+  if (localGroups.length === 0 && localExpenses.length === 0 && localSettlements.length === 0) {
+    return { groups: 0, expenses: 0, settlements: 0, updates: [] };
   }
 
   const res = await fetch("/api/sync/push", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ groups: localGroups, expenses: localExpenses }),
+    body: JSON.stringify({ groups: localGroups, expenses: localExpenses, settlements: localSettlements }),
   });
 
   if (!res.ok) {
@@ -75,10 +88,11 @@ async function pushLocalChanges() {
   const data = (await res.json()) as {
     groups: number;
     expenses: number;
+    settlements: number;
     updatedGroups?: Array<{ id: string; code: string; updatedAt: string }>;
   };
 
-  await db.transaction("rw", db.groups, db.expenses, async () => {
+  await db.transaction("rw", db.groups, db.expenses, db.settlements, async () => {
     for (const group of localGroups) {
       await db.groups.update(group.id, {
         synced: true,
@@ -87,6 +101,9 @@ async function pushLocalChanges() {
     }
     for (const expense of localExpenses) {
       await db.expenses.update(expense.id, { synced: true });
+    }
+    for (const settlement of localSettlements) {
+      await db.settlements.update(settlement.id, { synced: true });
     }
     if (data.updatedGroups) {
       for (const updated of data.updatedGroups) {
@@ -102,6 +119,7 @@ async function pushLocalChanges() {
   return {
     groups: data.groups,
     expenses: data.expenses,
+    settlements: data.settlements,
     updates: data.updatedGroups ?? [],
   };
 }
@@ -115,17 +133,20 @@ async function pullServerData() {
   const data = (await res.json()) as {
     groups: RemoteGroup[];
     expenses: RemoteExpense[];
+    settlements: RemoteSettlement[];
   };
 
   let syncedGroups = 0;
   let syncedExpenses = 0;
+  let syncedSettlements = 0;
 
-  await db.transaction("rw", db.groups, db.expenses, db.members, async () => {
+  await db.transaction("rw", db.groups, db.expenses, db.members, db.settlements, async () => {
     for (const group of data.groups) {
       if (group.deleted) {
         await db.groups.delete(group.id);
         await db.expenses.where("groupId").equals(group.id).delete();
         await db.members.where("groupId").equals(group.id).delete();
+        await db.settlements.where("groupId").equals(group.id).delete();
         continue;
       }
 
@@ -145,8 +166,6 @@ async function pullServerData() {
         });
         syncedGroups += 1;
       }
-
-      const serverMemberUserIds = group.members.filter((member) => !member.deleted).map((member) => member.userId);
 
       for (const serverMember of group.members) {
         if (serverMember.deleted) {
@@ -170,6 +189,7 @@ async function pullServerData() {
         }
       }
 
+      const serverMemberUserIds = group.members.filter((member) => !member.deleted).map((member) => member.userId);
       if (serverMemberUserIds.length > 0) {
         await db.members
           .where("groupId")
@@ -203,9 +223,33 @@ async function pullServerData() {
         syncedExpenses += 1;
       }
     }
+
+    for (const settlement of data.settlements) {
+      if (settlement.deleted) {
+        await db.settlements.delete(settlement.id);
+        continue;
+      }
+
+      const localSettlement = await db.settlements.get(settlement.id);
+      if (!localSettlement || isNewer(settlement.updatedAt, localSettlement.updatedAt)) {
+        await db.settlements.put({
+          id: settlement.id,
+          fromUserId: settlement.fromUserId,
+          toUserId: settlement.toUserId,
+          groupId: settlement.groupId,
+          amount: settlement.amount,
+          status: settlement.status,
+          createdAt: settlement.createdAt,
+          updatedAt: settlement.updatedAt,
+          synced: true,
+          deleted: false,
+        });
+        syncedSettlements += 1;
+      }
+    }
   });
 
-  return { syncedGroups, syncedExpenses };
+  return { syncedGroups, syncedExpenses, syncedSettlements };
 }
 
 export async function pullGroupsToLocal() {
